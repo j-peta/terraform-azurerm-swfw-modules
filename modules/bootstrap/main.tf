@@ -187,10 +187,5 @@ resource "azurerm_storage_share_file" "this" {
   path             = each.value.remote_path
   storage_share_id = local.file_shares[each.value.file_share].id
   source           = each.value.source_path
-  content_md5 = try(
-    var.file_shares[each.value.file_share].bootstrap_files_md5[each.value.source_path],
-    filemd5(each.value.source_path)
-  )
-
   depends_on = [azurerm_storage_share_directory.this]
 }

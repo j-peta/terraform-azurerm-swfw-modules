@@ -2,9 +2,7 @@
 
 # https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password
 resource "random_password" "this" {
-  count = anytrue([for _, v in var.vmseries : v.authentication.password == null]) ? (
-    anytrue([for _, v in var.test_infrastructure : v.authentication.password == null]) ? 2 : 1
-  ) : 0
+  count = length(var.vmseries)  # Count based on the number of VM series defined
 
   length           = 16
   min_lower        = 16 - 4
@@ -26,6 +24,7 @@ locals {
     )
   }
 }
+
 
 # Create or source a Resource Group
 
@@ -163,63 +162,6 @@ module "load_balancer" {
 
   tags       = var.tags
   depends_on = [module.vnet]
-}
-
-# Create Application Gateways
-
-locals {
-  nics_with_appgw_key = flatten([
-    for k, v in var.vmseries : [
-      for nic in v.interfaces : {
-        vm_key    = k
-        nic_name  = nic.name
-        appgw_key = nic.application_gateway_key
-      } if nic.application_gateway_key != null
-  ]])
-
-  ips_4_nics_with_appgw_key = {
-    for v in local.nics_with_appgw_key :
-    v.appgw_key => module.vmseries[v.vm_key].interfaces["${var.name_prefix}${v.nic_name}"].private_ip_address...
-  }
-}
-
-module "appgw" {
-  source = "../../modules/appgw"
-
-  for_each = var.appgws
-
-  name                = "${var.name_prefix}${each.value.name}"
-  resource_group_name = local.resource_group.name
-  region              = var.region
-  subnet_id           = module.vnet[each.value.vnet_key].subnet_ids[each.value.subnet_key]
-
-  zones = each.value.zones
-  public_ip = merge(
-    each.value.public_ip,
-    { name = "${each.value.public_ip.create ? var.name_prefix : ""}${each.value.public_ip.name}" }
-  )
-  domain_name_label              = each.value.domain_name_label
-  capacity                       = each.value.capacity
-  enable_http2                   = each.value.enable_http2
-  waf                            = each.value.waf
-  managed_identities             = each.value.managed_identities
-  global_ssl_policy              = each.value.global_ssl_policy
-  ssl_profiles                   = each.value.ssl_profiles
-  frontend_ip_configuration_name = each.value.frontend_ip_configuration_name
-  listeners                      = each.value.listeners
-  backend_pool = merge(
-    each.value.backend_pool,
-    length(local.ips_4_nics_with_appgw_key) == 0 ? {} : { vmseries_ips = local.ips_4_nics_with_appgw_key[each.key] }
-  )
-  backend_settings = each.value.backend_settings
-  probes           = each.value.probes
-  rewrites         = each.value.rewrites
-  redirects        = each.value.redirects
-  url_path_maps    = each.value.url_path_maps
-  rules            = each.value.rules
-
-  tags       = var.tags
-  depends_on = [module.vnet, module.vmseries]
 }
 
 # Create VM-Series VMs and closely associated resources
@@ -410,57 +352,4 @@ module "vmseries" {
     module.load_balancer,
     module.bootstrap,
   ]
-}
-
-# Create test infrastructure
-
-locals {
-  test_vm_authentication = {
-    for k, v in var.test_infrastructure : k =>
-    merge(
-      v.authentication,
-      {
-        password = coalesce(v.authentication.password, try(random_password.this[1].result, null))
-      }
-    )
-  }
-}
-
-module "test_infrastructure" {
-  source = "../../modules/test_infrastructure"
-
-  for_each = var.test_infrastructure
-
-  resource_group_name = try(
-    "${var.name_prefix}${each.value.resource_group_name}", "${local.resource_group.name}-testenv"
-  )
-  region = var.region
-  vnets = { for k, v in each.value.vnets : k => merge(v, {
-    name                    = "${var.name_prefix}${v.name}"
-    hub_vnet_name           = "${var.name_prefix}${v.hub_vnet_name}"
-    hub_resource_group_name = coalesce(v.hub_resource_group_name, local.resource_group.name)
-    network_security_groups = { for kv, vv in v.network_security_groups : kv => merge(vv, {
-      name = "${var.name_prefix}${vv.name}" })
-    }
-    route_tables = { for kv, vv in v.route_tables : kv => merge(vv, {
-      name = "${var.name_prefix}${vv.name}" })
-    }
-  }) }
-  load_balancers = { for k, v in each.value.load_balancers : k => merge(v, {
-    name         = "${var.name_prefix}${v.name}"
-    backend_name = coalesce(v.backend_name, "${v.name}-backend")
-  }) }
-  authentication = local.test_vm_authentication[each.key]
-  spoke_vms = { for k, v in each.value.spoke_vms : k => merge(v, {
-    name           = "${var.name_prefix}${v.name}"
-    interface_name = "${var.name_prefix}${coalesce(v.interface_name, "${v.name}-nic")}"
-    disk_name      = "${var.name_prefix}${coalesce(v.disk_name, "${v.name}-osdisk")}"
-  }) }
-  bastions = { for k, v in each.value.bastions : k => merge(v, {
-    name           = "${var.name_prefix}${v.name}"
-    public_ip_name = "${var.name_prefix}${coalesce(v.public_ip_name, "${v.name}-pip")}"
-  }) }
-
-  tags       = var.tags
-  depends_on = [module.vnet]
 }
