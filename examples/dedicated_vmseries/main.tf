@@ -51,15 +51,13 @@ locals {
 
 module "vnet" {
   source = "../../modules/vnet"
-
   for_each = var.vnets
 
   name                   = each.value.create_virtual_network ? "${var.name_prefix}${each.value.name}" : each.value.name
   create_virtual_network = each.value.create_virtual_network
   resource_group_name    = coalesce(each.value.resource_group_name, local.resource_group.name)
   region                 = var.region
-
-  address_space = each.value.address_space
+  address_space          = each.value.address_space
 
   create_subnets = each.value.create_subnets
   subnets        = each.value.subnets
@@ -74,9 +72,10 @@ module "vnet" {
   tags = var.tags
 }
 
+
+
 module "vnet_peering" {
   source = "../../modules/vnet_peering"
-
   for_each = var.vnet_peerings
 
   local_peer_config = {
@@ -90,6 +89,41 @@ module "vnet_peering" {
     vnet_name           = each.value.remote_vnet_name
   }
 
+  depends_on = [module.vnet]
+}
+
+# Azure Firewall Policy
+resource "azurerm_firewall_policy" "default" {
+  name                = "${var.name_prefix}-firewall-policy"
+  location            = var.region
+  resource_group_name = local.resource_group.name
+
+  tags = var.tags
+}
+resource "azurerm_public_ip" "hub_firewall_ip" {
+  name                = "${var.name_prefix}-hub-fw-ip"
+  location            = var.region
+  resource_group_name = local.resource_group.name
+  allocation_method  = "Static"  # Or "Static" for a fixed IP
+  sku                 = "Standard"
+}
+
+resource "azurerm_firewall" "hub_firewall" {
+  name                = "${var.name_prefix}-hub-fw"
+  location            = var.region
+  resource_group_name = local.resource_group.name
+
+  sku_tier = "Standard"  # or "Premium" based on your requirement
+  sku_name = "AZFW_VNet"  # or "AZFW_Hub" based on your requirement
+
+  firewall_policy_id = azurerm_firewall_policy.default.id
+
+  ip_configuration {
+    name               = "internal"
+    subnet_id          = module.vnet["hub"].subnet_ids["AzureFirewallSubnet"]
+    private_ip_address = null  # Set to null or a specific IP if needed
+    public_ip_address_id = azurerm_public_ip.hub_firewall_ip.id
+  }
   depends_on = [module.vnet]
 }
 

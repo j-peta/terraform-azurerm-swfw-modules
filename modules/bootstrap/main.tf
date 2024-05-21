@@ -31,12 +31,10 @@ resource "azurerm_storage_account_network_rules" "this" {
   count = var.storage_account.create ? 1 : 0
 
   storage_account_id = azurerm_storage_account.this[0].id
-  default_action = length(var.storage_network_security.allowed_public_ips) > 0 || (
-    length(var.storage_network_security.allowed_subnet_ids) > 0
-  ) ? "Deny" : "Allow"
-  ip_rules                   = var.storage_network_security.allowed_public_ips
-  virtual_network_subnet_ids = var.storage_network_security.allowed_subnet_ids
+  default_action     = "Allow"  # Allow all access
+  # Remove ip_rules and virtual_network_subnet_ids since they're not needed for full access
 }
+
 
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/storage_account
 data "azurerm_storage_account" "this" {

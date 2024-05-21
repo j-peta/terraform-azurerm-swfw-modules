@@ -138,14 +138,6 @@ resource "azurerm_route" "this" {
   next_hop_in_ip_address = each.value.route.next_hop_type == "VirtualAppliance" ? each.value.route.next_hop_ip_address : null
 }
 
-# https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_network_security_group_association
-resource "azurerm_subnet_network_security_group_association" "this" {
-  for_each = { for k, v in var.subnets : k => v if v.network_security_group_key != null }
-
-  subnet_id                 = local.subnets[each.key].id
-  network_security_group_id = azurerm_network_security_group.this[each.value.network_security_group_key].id
-}
-
 # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_route_table_association
 resource "azurerm_subnet_route_table_association" "this" {
   for_each = { for k, v in var.subnets : k => v if v.route_table_key != null }
